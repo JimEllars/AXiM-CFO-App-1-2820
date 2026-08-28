@@ -22,6 +22,11 @@ function writeStorage(key, value) {
 }
 
 export function useApprovalQueue() {
+  const [error, setError] = useState(null);
+
+  if (error) {
+    throw error;
+  }
   const [items, setItems] = useState(() => (
     readStorage(STORAGE_KEY, initialApprovals)
   ));
@@ -55,6 +60,46 @@ export function useApprovalQueue() {
     recordAction(item, decision, status);
   }, [recordAction]);
 
+  const resolveWithEdge = useCallback(async (item, decision) => {
+    const edgeUrl = import.meta.env.VITE_CFO_EDGE_URL || '';
+
+    if (!item.token || !edgeUrl) {
+      resolveLocally(item, decision, 'preview');
+      return { success: true, message: `Preview action recorded. Connect the edge worker to execute ${decision}.` };
+    }
+
+    // Optimistic update
+    setItems((current) => current.filter((entry) => entry.id !== item.id));
+
+    try {
+      const query = new URLSearchParams({
+        token: item.token,
+        decision
+      });
+      const response = await fetch(
+        `${edgeUrl}/api/v1/hitl-resolve?${query}`
+      );
+
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || 'Approval could not be resolved');
+      }
+
+      recordAction(item, decision, 'executed');
+      return { success: true, message: `${item.id} resolved securely.` };
+    } catch (err) {
+      // Revert optimistic update
+      setItems((current) => {
+        // Insert back at the beginning
+        return [item, ...current];
+      });
+
+      // Trigger error boundary
+      setError(err instanceof Error ? err : new Error('Approval request failed.'));
+      return { success: false };
+    }
+  }, [resolveLocally, recordAction]);
+
   const removeItem = useCallback((item) => {
     setItems((current) => current.filter((entry) => entry.id !== item.id));
     recordAction(item, 'dismiss', 'preview');
@@ -69,6 +114,7 @@ export function useApprovalQueue() {
     items,
     auditLog,
     resolveLocally,
+    resolveWithEdge,
     removeItem,
     recordAction,
     restoreDefaults

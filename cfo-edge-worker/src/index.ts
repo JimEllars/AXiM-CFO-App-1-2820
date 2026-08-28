@@ -13,8 +13,6 @@ const defaultMetrics: FinancialMetrics = {
   updatedAt: new Date().toISOString()
 };
 
-let currentMetrics = { ...defaultMetrics };
-
 function allowedOrigin(request: Request, env: Env): string | null {
   const origin = request.headers.get('Origin');
   if (!origin) return null;
@@ -73,8 +71,16 @@ function safePayload(body: string): WebhookPayload {
   }
 }
 
-function updateMetrics(payload: WebhookPayload): void {
-  const next = { ...currentMetrics };
+async function updateMetrics(payload: WebhookPayload, env: Env): Promise<void> {
+  let current = { ...defaultMetrics };
+  try {
+    const cached = await env.METRICS_CACHE.get('currentMetrics', 'json') as FinancialMetrics | null;
+    if (cached) {
+      current = cached;
+    }
+  } catch {}
+
+  const next = { ...current };
 
   for (const key of [
     'grossRevenue',
@@ -97,15 +103,27 @@ function updateMetrics(payload: WebhookPayload): void {
     ? Number(((contribution / next.grossRevenue) * 100).toFixed(1))
     : 0;
   next.updatedAt = new Date().toISOString();
-  currentMetrics = next;
+
+  try {
+    await env.METRICS_CACHE.put('currentMetrics', JSON.stringify(next), { expirationTtl: 60 * 60 * 24 }); // Cache for 24h as fallback if no webhooks
+  } catch {}
 }
 
-function handleMetrics(
+async function handleMetrics(
   request: Request,
   env: Env
-): Response {
+): Promise<Response> {
+  let metrics = { ...defaultMetrics };
+  try {
+    const cached = await env.METRICS_CACHE.get('currentMetrics', 'json') as FinancialMetrics | null;
+    if (cached) {
+      metrics = cached;
+    }
+  } catch {
+    // Ignore KV error
+  }
   return jsonResponse(request, env, {
-    ...currentMetrics,
+    ...metrics,
     source: 'cfo-edge-worker'
   });
 }
@@ -113,6 +131,7 @@ function handleMetrics(
 async function handleSignedWebhook(
   request: Request,
   env: Env,
+  ctx: ExecutionContext,
   eventName: string,
   routeCrm = false
 ): Promise<Response> {
@@ -140,7 +159,7 @@ async function handleSignedWebhook(
   }
 
   const payload = safePayload(rawBody);
-  updateMetrics(payload);
+  await updateMetrics(payload, env);
 
   const results: Record<string, unknown> = {
     accepted: true,
@@ -149,7 +168,7 @@ async function handleSignedWebhook(
   };
 
   if (routeCrm && Object.keys(payload).length > 0) {
-    results.crm = await routeCrmPayload(payload, env);
+    results.crm = await routeCrmPayload(payload, env, ctx);
   }
 
   results.coreSynced = await pushToCore(eventName, payload, env);
@@ -159,7 +178,8 @@ async function handleSignedWebhook(
 
 function handleMetricsStream(
   request: Request,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext
 ): Response {
   const encoder = new TextEncoder();
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -168,13 +188,22 @@ function handleMetricsStream(
     start(controller) {
       let closed = false;
 
-      const publish = () => {
+      const publish = async () => {
         if (closed) return;
 
         try {
+          let metrics = { ...defaultMetrics };
+          try {
+            const cached = await env.METRICS_CACHE.get('currentMetrics', 'json') as FinancialMetrics | null;
+            if (cached) {
+              metrics = cached;
+            }
+          } catch {
+            // fallback to default
+          }
           const message = [
             'event: metrics',
-            `data: ${JSON.stringify(currentMetrics)}`,
+            `data: ${JSON.stringify(metrics)}`,
             '',
             ''
           ].join('\n');
@@ -186,9 +215,9 @@ function handleMetricsStream(
         }
       };
 
-      controller.enqueue(encoder.encode('retry: 5000\n\n'));
-      publish();
-      timer = setInterval(publish, 5000);
+      controller.enqueue(encoder.encode('retry: 15000\n\n'));
+      ctx.waitUntil(publish());
+      timer = setInterval(() => ctx.waitUntil(publish()), 15000);
     },
     cancel() {
       if (timer) clearInterval(timer);
@@ -329,7 +358,7 @@ export default {
       request.method === 'GET' &&
       url.pathname === '/api/v1/stream/metrics'
     ) {
-      return handleMetricsStream(request, env);
+      return handleMetricsStream(request, env, ctx);
     }
 
     if (
@@ -346,6 +375,7 @@ export default {
       return handleSignedWebhook(
         request,
         env,
+        ctx,
         'cfo.core.webhook'
       );
     }
@@ -357,6 +387,7 @@ export default {
       return handleSignedWebhook(
         request,
         env,
+        ctx,
         'cfo.selldone.ingested',
         true
       );

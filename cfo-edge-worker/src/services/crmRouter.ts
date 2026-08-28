@@ -32,11 +32,15 @@ function chooseDestination(payload: WebhookPayload): Destination {
     : 'suitedash';
 }
 
+import type { ExecutionContext } from '@cloudflare/workers-types';
+
 export async function routeCrmPayload(
   payload: WebhookPayload,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext
 ): Promise<CrmRouteResult> {
   const destination = chooseDestination(payload);
+  ctx.waitUntil(Promise.resolve(console.log(`[CRM Routing] Routed to ${destination === 'nexus' ? 'Nexus CRM' : 'SuiteDash'} based on payload`, { type: payload.type, category: payload.category })));
   const url = destination === 'nexus'
     ? env.NEXUS_CRM_URL
     : env.SUITEDASH_API_URL;
@@ -45,7 +49,7 @@ export async function routeCrmPayload(
     : env.SUITEDASH_API_TOKEN;
 
   if (!url || !token) {
-    console.warn('crm_route_not_configured', { destination });
+    ctx.waitUntil(Promise.resolve(console.warn('crm_route_not_configured', { destination })));
     return { destination, delivered: false, error: 'not_configured' };
   }
 
@@ -69,10 +73,10 @@ export async function routeCrmPayload(
     });
 
     if (!response.ok) {
-      console.error('crm_route_failed', {
+      ctx.waitUntil(Promise.resolve(console.error('crm_route_failed', {
         destination,
         status: response.status
-      });
+      })));
     }
 
     return {
@@ -82,10 +86,10 @@ export async function routeCrmPayload(
       error: response.ok ? undefined : 'provider_rejected'
     };
   } catch (error) {
-    console.error('crm_route_error', {
+    ctx.waitUntil(Promise.resolve(console.error('crm_route_error', {
       destination,
       error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    })));
 
     return {
       destination,

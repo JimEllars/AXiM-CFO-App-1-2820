@@ -13,12 +13,13 @@ const {
   FiX
 } = FiIcons;
 
-const edgeBaseUrl = import.meta.env.VITE_CFO_EDGE_URL || '';
+
 
 function ApprovalDesk({ compact = false }) {
   const {
     items,
     resolveLocally,
+    resolveWithEdge,
     removeItem
   } = useApprovalQueue();
   const [busyId, setBusyId] = useState('');
@@ -28,37 +29,12 @@ function ApprovalDesk({ compact = false }) {
     setBusyId(item.id);
     setMessage('');
 
-    try {
-      if (!item.token || !edgeBaseUrl) {
-        resolveLocally(item, decision, 'preview');
-        setMessage(
-          `Preview action recorded. Connect the edge worker to execute ${decision}.`
-        );
-        return;
-      }
-
-      const query = new URLSearchParams({
-        token: item.token,
-        decision
-      });
-      const response = await fetch(
-        `${edgeBaseUrl}/api/v1/hitl-resolve?${query}`
-      );
-
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}));
-        throw new Error(result.error || 'Approval could not be resolved');
-      }
-
-      resolveLocally(item, decision, 'executed');
-      setMessage(`${item.id} resolved securely.`);
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : 'Approval request failed.'
-      );
-    } finally {
-      setBusyId('');
+    const result = await resolveWithEdge(item, decision);
+    if (result.success && result.message) {
+      setMessage(result.message);
     }
+
+    setBusyId('');
   };
 
   const visibleItems = items.slice(0, compact ? 2 : items.length);

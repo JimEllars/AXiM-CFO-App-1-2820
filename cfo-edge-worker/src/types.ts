@@ -1,3 +1,4 @@
+import type { KVNamespace } from '@cloudflare/workers-types';
 export interface Env {
   AXIM_CORE_SECRET: string;
   AXIM_CORE_API_URL?: string;
@@ -13,6 +14,7 @@ export interface Env {
   SUITEDASH_API_URL?: string;
   SUITEDASH_API_TOKEN?: string;
   HITL_APPROVAL_BASE_URL: string;
+  METRICS_CACHE: KVNamespace;
 }
 
 export interface FinancialMetrics {

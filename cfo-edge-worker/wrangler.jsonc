@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cfo-edge-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-21",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "cfo.example.com/api/*",
+      "zone_name": "example.com"
+    }
+  ],
+  "vars": {
+    "ALLOWED_ORIGINS": "https://cfo.example.com,https://internal.example.com",
+    "HITL_APPROVAL_BASE_URL": "https://cfo.example.com/api/v1/hitl-resolve",
+    "EMAIL_FROM": "AXiM Finance <finance@example.com>",
+    "EMAILIT_API_URL": "https://api.emailit.com/v1/emails",
+    "RESEND_API_URL": "https://api.resend.com/emails"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

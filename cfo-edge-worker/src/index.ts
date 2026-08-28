@@ -133,7 +133,8 @@ async function handleSignedWebhook(
   env: Env,
   ctx: ExecutionContext,
   eventName: string,
-  routeCrm = false
+  routeCrm = false,
+  asyncProcess = false
 ): Promise<Response> {
   const rawBody = await request.text();
 
@@ -159,19 +160,30 @@ async function handleSignedWebhook(
   }
 
   const payload = safePayload(rawBody);
-  await updateMetrics(payload, env);
 
-  const results: Record<string, unknown> = {
-    accepted: true,
-    event: eventName,
-    empty: Object.keys(payload).length === 0
+  const processPayload = async () => {
+    await updateMetrics(payload, env);
+
+    const results: Record<string, unknown> = {
+      accepted: true,
+      event: eventName,
+      empty: Object.keys(payload).length === 0
+    };
+
+    if (routeCrm && Object.keys(payload).length > 0) {
+      results.crm = await routeCrmPayload(payload, env, ctx);
+    }
+
+    results.coreSynced = await pushToCore(eventName, payload, env);
+    return results;
   };
 
-  if (routeCrm && Object.keys(payload).length > 0) {
-    results.crm = await routeCrmPayload(payload, env, ctx);
+  if (asyncProcess) {
+    ctx.waitUntil(processPayload());
+    return jsonResponse(request, env, { accepted: true, event: eventName, async: true }, 200);
   }
 
-  results.coreSynced = await pushToCore(eventName, payload, env);
+  const results = await processPayload();
 
   return jsonResponse(request, env, results, 202);
 }
@@ -376,19 +388,8 @@ export default {
         request,
         env,
         ctx,
-        'cfo.core.webhook'
-      );
-    }
-
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/v1/selldone-ingest'
-    ) {
-      return handleSignedWebhook(
-        request,
-        env,
-        ctx,
         'cfo.selldone.ingested',
+        true,
         true
       );
     }

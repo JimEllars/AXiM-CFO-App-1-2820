@@ -6,6 +6,7 @@ import MarginGauge from '../components/dashboard/MarginGauge';
 import MetricCard from '../components/dashboard/MetricCard';
 import TreasuryPanel from '../components/dashboard/TreasuryPanel';
 import YieldTracker from '../components/dashboard/YieldTracker';
+import ErrorBoundary from '../components/layout/ErrorBoundary';
 
 const currency = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -18,19 +19,19 @@ function CFODashboard() {
 
   return (
     <>
-      <div className="page-heading">
+      <div className="page-heading flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <span className="eyebrow">Financial command center</span>
-          <h1>Executive overview</h1>
-          <p>Real-time capital efficiency, unit economics, and treasury controls.</p>
+          <span className="eyebrow text-xs font-semibold uppercase tracking-widest text-[var(--muted)] mb-2 block">Financial command center</span>
+          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Executive overview</h1>
+          <p className="text-sm text-[var(--muted)]">Real-time capital efficiency, unit economics, and treasury controls.</p>
         </div>
-        <div className="period-selector">
-          <span>Reporting window</span>
-          <strong>Current funnel cycle</strong>
+        <div className="period-selector flex flex-col items-end text-right p-3 rounded-lg bg-[rgba(255,255,255,0.03)] border border-[rgba(202,236,221,0.08)]">
+          <span className="text-xs text-[var(--muted)] uppercase tracking-wider mb-1">Reporting window</span>
+          <strong className="text-sm text-[var(--mint)]">Current funnel cycle</strong>
         </div>
       </div>
 
-      <section className="metric-grid">
+      <section className="metric-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <MetricCard
           label="Gross funnel revenue"
           value={currency.format(metrics.grossRevenue)}
@@ -62,9 +63,9 @@ function CFODashboard() {
         />
       </section>
 
-      <div className="dashboard-grid">
-        <MarginGauge value={metrics.netContributionMargin} />
-        <YieldTracker />
+      <div className="dashboard-grid grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ErrorBoundary><MarginGauge value={metrics.netContributionMargin} /></ErrorBoundary>
+        <ErrorBoundary><YieldTracker /></ErrorBoundary>
         <CommissionTable />
         <TreasuryPanel />
       </div>

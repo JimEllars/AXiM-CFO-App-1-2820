@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { defaultMetrics } from '../data/financialData';
 
 const edgeBaseUrl = import.meta.env.VITE_CFO_EDGE_URL || '';
@@ -13,33 +13,62 @@ export function useFinancialMetrics() {
     edgeBaseUrl ? 'connecting' : 'sample'
   );
 
+  const retryTimeout = useRef(null);
+  const reconnectAttempts = useRef(0);
+  const maxReconnectDelay = 30000;
+
   useEffect(() => {
     if (!edgeBaseUrl) return undefined;
 
     let mounted = true;
-    const stream = new EventSource(getStreamUrl());
+    let stream = null;
 
-    const handleMetrics = (event) => {
-      try {
-        const nextMetrics = JSON.parse(event.data);
+    const connect = () => {
+      if (!mounted) return;
+
+      stream = new EventSource(getStreamUrl());
+
+      const handleMetrics = (event) => {
+        try {
+          const nextMetrics = JSON.parse(event.data);
+
+          if (mounted) {
+            setMetrics((current) => ({ ...current, ...nextMetrics }));
+            setConnection('live');
+            reconnectAttempts.current = 0;
+          }
+        } catch {
+          if (mounted) setConnection('degraded');
+        }
+      };
+
+      stream.addEventListener('metrics', handleMetrics);
+
+      stream.onopen = () => {
+        if (mounted) {
+          setConnection('live');
+          reconnectAttempts.current = 0;
+        }
+      };
+
+      stream.onerror = () => {
+        stream.close();
 
         if (mounted) {
-          setMetrics((current) => ({ ...current, ...nextMetrics }));
-          setConnection('live');
+          setConnection('connecting');
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), maxReconnectDelay);
+          reconnectAttempts.current++;
+          retryTimeout.current = setTimeout(connect, delay);
         }
-      } catch {
-        if (mounted) setConnection('degraded');
-      }
+      };
     };
 
-    stream.addEventListener('metrics', handleMetrics);
-    stream.onopen = () => mounted && setConnection('live');
-    stream.onerror = () => mounted && setConnection('sample');
+    connect();
 
     return () => {
       mounted = false;
-      stream.removeEventListener('metrics', handleMetrics);
-      stream.close();
+      if (retryTimeout.current) clearTimeout(retryTimeout.current);
+      if (stream) stream.close();
     };
   }, []);
 

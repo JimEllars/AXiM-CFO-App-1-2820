@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import AppRouter from './routes/AppRouter';
+import ErrorBoundary from './components/layout/ErrorBoundary';
 import './App.css';
 
 function App() {
@@ -11,9 +12,11 @@ function App() {
   }, []);
 
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <AppRouter />
     </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

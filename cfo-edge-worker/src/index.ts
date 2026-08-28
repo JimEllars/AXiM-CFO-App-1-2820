@@ -2,9 +2,15 @@ import { routeCrmPayload } from './services/crmRouter';
 import { pushToCore } from './services/coreApi';
 import { verifyHitlToken, verifyWebhookSignature } from './security';
 import type { Env, FinancialMetrics, WebhookPayload } from './types';
-import type { ExecutionContext } from '@cloudflare/workers-types';
+import type { ExecutionContext, MessageBatch } from '@cloudflare/workers-types';
 
 const defaultMetrics: FinancialMetrics = {
+  commissionTiers: [
+    { channel: 'Print-on-Demand', bracket: 10, accrued: 48, status: 'Healthy' },
+    { channel: 'Coaching Referrals', bracket: 20, accrued: 96, status: 'Healthy' },
+    { channel: 'Bundled Digital', bracket: 25, accrued: 73, status: 'Review' },
+    { channel: 'Standalone Digital Packs', bracket: 35, accrued: 95, status: 'Healthy' }
+  ],
   grossRevenue: 2065,
   affiliatePayouts: 312,
   fixedOpex: 150,
@@ -95,6 +101,10 @@ async function updateMetrics(payload: WebhookPayload, env: Env): Promise<void> {
     }
   }
 
+  if (payload.commissionTiers && Array.isArray(payload.commissionTiers)) {
+    next.commissionTiers = payload.commissionTiers;
+  }
+
   const contribution = next.grossRevenue
     - next.affiliatePayouts
     - next.fixedOpex;
@@ -161,22 +171,21 @@ async function handleSignedWebhook(
 
   const payload = safePayload(rawBody);
 
-  const processPayload = async () => {
-    await updateMetrics(payload, env);
-
-    const results: Record<string, unknown> = {
-      accepted: true,
-      event: eventName,
-      empty: Object.keys(payload).length === 0
-    };
-
-    if (routeCrm && Object.keys(payload).length > 0) {
-      results.crm = await routeCrmPayload(payload, env, ctx);
+  if (env.WEBHOOK_QUEUE) {
+    try {
+      await env.WEBHOOK_QUEUE.send({
+        eventName,
+        payload,
+        routeCrm,
+        asyncProcess
+      });
+      return jsonResponse(request, env, { accepted: true, event: eventName, queued: true }, 200);
+    } catch (e) {
+      console.error("Queue send failed", e);
     }
+  }
 
-    results.coreSynced = await pushToCore(eventName, payload, env);
-    return results;
-  };
+  const processPayload = async () => processWebhookPayload(payload, eventName, routeCrm, env, ctx);
 
   if (asyncProcess) {
     ctx.waitUntil(processPayload());
@@ -312,15 +321,41 @@ async function handleHitlResolve(
 
   await markTokenUsed(token, tokenData.expiresAt);
 
-  const coreSynced = await pushToCore(
-    'cfo.hitl.resolved',
-    {
+  const actionData = {
       action: tokenData.action,
       resourceId: tokenData.resourceId,
       decision
-    },
+  };
+
+  const coreSynced = await pushToCore(
+    'cfo.hitl.resolved',
+    actionData,
     env
   );
+
+  try {
+    const entry = {
+      id: `${tokenData.resourceId}-${Date.now()}`,
+      approvalId: tokenData.resourceId,
+      decision,
+      status: 'executed',
+      amount: 'N/A', // Real app would likely extract this from tokenData or lookup
+      timestamp: new Date().toISOString()
+    };
+
+    let logs = [];
+    try {
+      const existing = await env.CFO_AUDIT_CACHE.get('auditLogs', 'json');
+      if (existing && Array.isArray(existing)) {
+        logs = existing;
+      }
+    } catch {}
+
+    logs = [entry, ...logs].slice(0, 50);
+    await env.CFO_AUDIT_CACHE.put('auditLogs', JSON.stringify(logs));
+  } catch (e) {
+    console.error("Failed to save audit log", e);
+  }
 
   return jsonResponse(request, env, {
     resolved: true,
@@ -330,7 +365,37 @@ async function handleHitlResolve(
   });
 }
 
+async function processWebhookPayload(payload: WebhookPayload, eventName: string, routeCrm: boolean, env: Env, ctx: ExecutionContext) {
+  await updateMetrics(payload, env);
+
+  const results: Record<string, unknown> = {
+    accepted: true,
+    event: eventName,
+    empty: Object.keys(payload).length === 0
+  };
+
+  if (routeCrm && Object.keys(payload).length > 0) {
+    results.crm = await routeCrmPayload(payload, env, ctx);
+  }
+
+  results.coreSynced = await pushToCore(eventName, payload, env);
+  return results;
+}
+
 export default {
+  async queue(batch: MessageBatch<any>, env: Env, ctx: ExecutionContext): Promise<void> {
+    for (const message of batch.messages) {
+      try {
+        const { eventName, payload, routeCrm } = message.body;
+        await processWebhookPayload(payload, eventName, routeCrm, env, ctx);
+        message.ack();
+      } catch (error) {
+        console.error("Queue processing error", error);
+        message.retry();
+      }
+    }
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
@@ -403,6 +468,22 @@ export default {
         service: 'cfo-edge-worker',
         timestamp: new Date().toISOString()
       });
+    }
+
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/v1/audit-log'
+    ) {
+      let logs = [];
+      try {
+        const existing = await env.CFO_AUDIT_CACHE.get('auditLogs', 'json');
+        if (existing && Array.isArray(existing)) {
+          logs = existing;
+        }
+      } catch (e) {
+        // Ignore KV error
+      }
+      return jsonResponse(request, env, logs);
     }
 
     return jsonResponse(

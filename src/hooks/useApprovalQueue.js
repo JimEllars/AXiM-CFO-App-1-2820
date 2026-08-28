@@ -35,6 +35,27 @@ export function useApprovalQueue() {
   ));
 
   useEffect(() => {
+    const fetchAuditLogs = async () => {
+      const edgeUrl = import.meta.env.VITE_CFO_EDGE_URL || '';
+      if (edgeUrl) {
+        try {
+          const response = await fetch(`${edgeUrl}/api/v1/audit-log`);
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+              setAuditLog(data);
+              writeStorage(AUDIT_KEY, data);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fetch audit logs", e);
+        }
+      }
+    };
+    fetchAuditLogs();
+  }, []);
+
+  useEffect(() => {
     writeStorage(STORAGE_KEY, items);
   }, [items]);
 

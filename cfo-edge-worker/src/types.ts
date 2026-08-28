@@ -1,4 +1,4 @@
-import type { KVNamespace } from '@cloudflare/workers-types';
+import type { KVNamespace, Queue } from '@cloudflare/workers-types';
 export interface Env {
   AXIM_CORE_SECRET: string;
   AXIM_CORE_API_URL?: string;
@@ -15,9 +15,19 @@ export interface Env {
   SUITEDASH_API_TOKEN?: string;
   HITL_APPROVAL_BASE_URL: string;
   METRICS_CACHE: KVNamespace;
+  CFO_AUDIT_CACHE: KVNamespace;
+  WEBHOOK_QUEUE: Queue;
+}
+
+export interface CommissionTier {
+  channel: string;
+  bracket: number;
+  accrued: number;
+  status: string;
 }
 
 export interface FinancialMetrics {
+  commissionTiers?: CommissionTier[];
   grossRevenue: number;
   affiliatePayouts: number;
   fixedOpex: number;
@@ -35,5 +45,6 @@ export interface WebhookPayload {
   affiliatePayouts?: number;
   fixedOpex?: number;
   assessments?: number;
+  commissionTiers?: CommissionTier[];
   [key: string]: unknown;
 }

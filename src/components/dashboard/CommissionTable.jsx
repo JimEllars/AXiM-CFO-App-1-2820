@@ -1,7 +1,20 @@
-import React from 'react';
-import { commissionRows } from '../../data/financialData';
+import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 
 function CommissionTable() {
+  const { metrics } = useOutletContext();
+  const [highlightRow, setHighlightRow] = useState(null);
+
+  useEffect(() => {
+    if (metrics.commissionTiers) {
+      setHighlightRow('all');
+      const timer = setTimeout(() => setHighlightRow(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [metrics.updatedAt]);
+
+  const tiers = metrics.commissionTiers || [];
+
   return (
     <section className="panel table-panel">
       <div className="panel-heading">
@@ -23,11 +36,11 @@ function CommissionTable() {
             </tr>
           </thead>
           <tbody>
-            {commissionRows.map((row) => (
-              <tr key={row.channel}>
+            {tiers.map((row) => (
+              <tr key={row.channel} className={highlightRow === 'all' ? 'bg-emerald-500/10 transition-colors duration-500' : 'transition-colors duration-1000'}>
                 <td>{row.channel}</td>
                 <td>
-                  <span className="bracket">{row.bracket}%</span>
+                  {row.bracket}%
                 </td>
                 <td>${row.accrued}</td>
                 <td>

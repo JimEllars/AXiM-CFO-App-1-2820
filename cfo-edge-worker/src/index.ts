@@ -2,6 +2,7 @@ import { routeCrmPayload } from './services/crmRouter';
 import { pushToCore } from './services/coreApi';
 import { verifyHitlToken, verifyWebhookSignature } from './security';
 import type { Env, FinancialMetrics, WebhookPayload } from './types';
+import type { ExecutionContext } from '@cloudflare/workers-types';
 
 const defaultMetrics: FinancialMetrics = {
   grossRevenue: 2065,
@@ -29,13 +30,16 @@ function allowedOrigin(request: Request, env: Env): string | null {
 function corsHeaders(request: Request, env: Env): Headers {
   const headers = new Headers({
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-AXiM-Signature',
+    'Access-Control-Allow-Headers': 'Content-Type, X-AXiM-Signature, Authorization',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin'
   });
 
   const origin = allowedOrigin(request, env);
-  if (origin) headers.set('Access-Control-Allow-Origin', origin);
+  if (origin) {
+    headers.set('Access-Control-Allow-Origin', origin);
+    headers.set('Access-Control-Allow-Credentials', 'true');
+  }
 
   return headers;
 }
@@ -113,6 +117,13 @@ async function handleSignedWebhook(
   routeCrm = false
 ): Promise<Response> {
   const rawBody = await request.text();
+
+  // Track payload integrity observability natively
+  console.log(`[Webhook Received] Event: ${eventName}`, {
+    contentLength: rawBody.length,
+    timestamp: new Date().toISOString()
+  });
+
   const valid = await verifyWebhookSignature(
     rawBody,
     request.headers.get('X-AXiM-Signature'),
@@ -198,7 +209,7 @@ async function tokenWasUsed(token: string): Promise<boolean> {
     `https://hitl-token.internal/${encodeURIComponent(token)}`
   );
 
-  return Boolean(await caches.default.match(cacheKey));
+  return Boolean(await (caches as any).default.match(cacheKey));
 }
 
 async function markTokenUsed(
@@ -213,7 +224,7 @@ async function markTokenUsed(
     expiresAt - Math.floor(Date.now() / 1000)
   );
 
-  await caches.default.put(
+  await (caches as any).default.put(
     cacheKey,
     new Response('used', {
       headers: { 'Cache-Control': `public, max-age=${maxAge}` }
@@ -279,7 +290,7 @@ async function handleHitlResolve(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {

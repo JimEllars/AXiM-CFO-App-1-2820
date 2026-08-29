@@ -20,11 +20,32 @@
   "observability": {
     "enabled": true
   },
+  "queues": {
+    "producers": [
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "cfo-webhook-queue"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "cfo-webhook-queue",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  },
   "kv_namespaces": [
     {
       "binding": "METRICS_CACHE",
       "id": "placeholder_id",
       "preview_id": "placeholder_preview_id"
+    },
+    {
+      "binding": "CFO_AUDIT_CACHE",
+      "id": "placeholder_audit_id",
+      "preview_id": "placeholder_audit_preview_id"
     }
   ]
 }

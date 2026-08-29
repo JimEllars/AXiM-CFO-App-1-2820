@@ -1,6 +1,12 @@
 export const targetMargin = 77.6;
 
 export const defaultMetrics = {
+  commissionTiers: [
+    { channel: 'Print-on-Demand', bracket: 10, accrued: 48, status: 'Healthy' },
+    { channel: 'Coaching Referrals', bracket: 20, accrued: 96, status: 'Healthy' },
+    { channel: 'Bundled Digital', bracket: 25, accrued: 73, status: 'Review' },
+    { channel: 'Standalone Digital Packs', bracket: 35, accrued: 95, status: 'Healthy' }
+  ],
   grossRevenue: 2065,
   affiliatePayouts: 312,
   fixedOpex: 150,
